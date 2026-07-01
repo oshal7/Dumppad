@@ -1,6 +1,6 @@
-const fs = require('fs')
-const path = require('path')
-const crypto = require('crypto')
+import fs from 'fs'
+import path from 'path'
+import crypto from 'crypto'
 
 const DEFAULT_SETTINGS = {
   aiEnabled: true,
@@ -16,7 +16,7 @@ function kindForExt(ext) {
   return IMAGE_EXTS.has(ext.toLowerCase()) ? 'image' : 'file'
 }
 
-class Storage {
+export class Storage {
   constructor(userDataPath) {
     this.dataPath = path.join(userDataPath, 'carpet-data.json')
     this.filesDir = path.join(userDataPath, 'library', 'files')
@@ -130,4 +130,4 @@ class Storage {
   }
 }
 
-module.exports = { Storage, DEFAULT_SETTINGS }
+export { DEFAULT_SETTINGS }

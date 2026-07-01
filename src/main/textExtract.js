@@ -1,17 +1,17 @@
-const fs = require('fs')
-const path = require('path')
+import fs from 'fs'
+import path from 'path'
+import pdfParse from 'pdf-parse'
 
 const MAX_EXTRACT_CHARS = 20000
 const TEXT_EXTS = new Set(['.txt', '.md', '.markdown', '.json', '.csv', '.log'])
 
 // Best-effort local text extraction for indexing. Returns null when the file
 // type isn't supported — those items just fall back to filename search.
-async function extractText(filePath) {
+export async function extractText(filePath) {
   const ext = path.extname(filePath).toLowerCase()
 
   try {
     if (ext === '.pdf') {
-      const pdfParse = require('pdf-parse')
       const buffer = fs.readFileSync(filePath)
       const data = await pdfParse(buffer)
       return (data.text || '').trim().slice(0, MAX_EXTRACT_CHARS) || null
@@ -27,5 +27,3 @@ async function extractText(filePath) {
 
   return null
 }
-
-module.exports = { extractText }

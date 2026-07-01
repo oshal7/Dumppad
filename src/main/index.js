@@ -1,4 +1,4 @@
-const {
+import {
   app,
   BrowserWindow,
   globalShortcut,
@@ -9,15 +9,15 @@ const {
   Menu,
   nativeImage,
   shell,
-} = require('electron')
-const path = require('path')
-const fs = require('fs')
-const crypto = require('crypto')
+} from 'electron'
+import path from 'path'
+import fs from 'fs'
+import crypto from 'crypto'
 
-const { Storage } = require('./storage')
-const { ClipboardMonitor } = require('./clipboardMonitor')
-const { AIClient, cosineSimilarity } = require('./ai')
-const { extractText } = require('./textExtract')
+import { Storage } from './storage.js'
+import { ClipboardMonitor } from './clipboardMonitor.js'
+import { AIClient, cosineSimilarity } from './ai.js'
+import { extractText } from './textExtract.js'
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) { app.quit(); process.exit(0) }

@@ -1,4 +1,4 @@
-const { exec } = require('child_process')
+import { exec } from 'child_process'
 
 const POLL_INTERVAL_MS = 700
 const MIN_PROMPT_LENGTH = 25
@@ -23,7 +23,7 @@ function getActiveApp() {
 // Watches the system clipboard for new *text* copies and surfaces "candidates"
 // worth prompting the user about. Images/files are captured separately via
 // drag-and-drop onto the notch, not through this monitor.
-class ClipboardMonitor {
+export class ClipboardMonitor {
   constructor(clipboardModule, onCandidate) {
     this.clipboard = clipboardModule
     this.onCandidate = onCandidate
@@ -68,5 +68,3 @@ class ClipboardMonitor {
     this.onCandidate({ content: trimmed, kind, sourceApp })
   }
 }
-
-module.exports = { ClipboardMonitor }

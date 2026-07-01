@@ -7,7 +7,7 @@
 const AVAILABILITY_CACHE_MS = 15000
 const REQUEST_TIMEOUT_MS = 30000
 
-class AIClient {
+export class AIClient {
   constructor(getSettings) {
     this.getSettings = getSettings
     this._availableCache = { value: false, checkedAt: 0 }
@@ -85,7 +85,7 @@ class AIClient {
   }
 }
 
-function cosineSimilarity(a, b) {
+export function cosineSimilarity(a, b) {
   if (!a || !b || a.length !== b.length) return -1
   let dot = 0, normA = 0, normB = 0
   for (let i = 0; i < a.length; i++) {
@@ -96,5 +96,3 @@ function cosineSimilarity(a, b) {
   if (normA === 0 || normB === 0) return -1
   return dot / (Math.sqrt(normA) * Math.sqrt(normB))
 }
-
-module.exports = { AIClient, cosineSimilarity }

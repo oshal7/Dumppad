@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Carpet — everything you don't want to lose, in one board</title>
+  <meta name="description" content="Carpet is a local-first Mac app that lives on the right edge of your screen. Drag anything onto it, copy anything worth keeping, and find it again with local AI search." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="nav">
+    <div class="nav__brand">
+      <span class="nav__dot"></span>
+      Carpet
+    </div>
+    <a class="nav__link" href="https://github.com/oshal7/Dumppad" target="_blank" rel="noopener">GitHub ↗</a>
+  </header>
+
+  <main>
+    <!-- ───────────────────────── Hero ───────────────────────── -->
+    <section class="hero">
+      <div class="hero__copy reveal">
+        <p class="eyebrow">For Mac · Local-first</p>
+        <h1>Everything you don't<br />want to lose.<br /><span class="accent">One board.</span></h1>
+        <p class="hero__sub">
+          Carpet lives on the right edge of your screen. Drag a file onto it,
+          copy something worth keeping, and it's saved — instantly, privately,
+          and searchable by meaning, not just words.
+        </p>
+        <div class="hero__actions">
+          <a class="btn btn--primary" href="https://github.com/oshal7/Dumppad" target="_blank" rel="noopener">
+            Get Carpet
+          </a>
+          <a class="btn btn--ghost" href="#how-it-works">See how it works</a>
+        </div>
+        <p class="hero__note">Free · Open source · Your data never leaves your Mac</p>
+      </div>
+
+      <div class="hero__visual reveal reveal--delay">
+        <div class="mock-screen">
+          <div class="mock-menubar">
+            <span></span><span></span><span></span>
+          </div>
+          <div class="mock-desktop">
+            <div class="mock-panel" id="mockPanel">
+              <div class="mock-edge"></div>
+              <div class="mock-board">
+                <div class="mock-card mock-card--img mock-card--1"></div>
+                <div class="mock-card mock-card--note mock-card--yellow">Chris Cox — early FB engineer, that long profile piece</div>
+                <div class="mock-card mock-card--img mock-card--2"></div>
+                <div class="mock-card mock-card--note mock-card--blue">nomic-embed-text — good default embedding model</div>
+                <div class="mock-card mock-card--img mock-card--3"></div>
+                <div class="mock-card mock-card--note mock-card--dark">const cosine = (a,b) =&gt; …</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────────────── Features ───────────────────────── -->
+    <section id="how-it-works" class="features">
+
+      <div class="feature reveal">
+        <div class="feature__visual">
+          <div class="demo demo--drop">
+            <div class="demo__ghost"></div>
+            <div class="demo__target">
+              <svg viewBox="0 0 16 16" fill="currentColor" width="22" height="22">
+                <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z" />
+                <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z" />
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="feature__copy">
+          <span class="feature__index">01</span>
+          <h2>Drag it. Drop it. Done.</h2>
+          <p>Drag any file or image toward the right edge of your screen, from
+             anywhere — Finder, a browser, another app. Carpet opens on its
+             own and catches it. No copy, no dialog, no folders to pick.</p>
+        </div>
+      </div>
+
+      <div class="feature feature--reverse reveal">
+        <div class="feature__visual">
+          <div class="demo demo--keep">
+            <div class="demo__card">
+              <span class="demo__badge">Link</span>
+              <p>An article you just copied…</p>
+              <div class="demo__row">
+                <span class="demo__btn demo__btn--dismiss">Dismiss</span>
+                <span class="demo__btn demo__btn--keep">Keep</span>
+              </div>
+              <div class="demo__timer"><div class="demo__timer-bar"></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="feature__copy">
+          <span class="feature__index">02</span>
+          <h2>Copy something worth keeping?</h2>
+          <p>Carpet notices and offers to keep it for three seconds. Say yes
+             and it's saved. Say nothing and it's gone — nothing you copy is
+             ever stored without you deciding first.</p>
+        </div>
+      </div>
+
+      <div class="feature reveal">
+        <div class="feature__visual">
+          <div class="demo demo--board">
+            <div class="demo__masonry">
+              <div class="demo__tile demo__tile--img demo__tile--a"></div>
+              <div class="demo__tile demo__tile--note demo__tile--yellow"></div>
+              <div class="demo__tile demo__tile--img demo__tile--b"></div>
+              <div class="demo__tile demo__tile--note demo__tile--blue"></div>
+              <div class="demo__tile demo__tile--img demo__tile--c"></div>
+              <div class="demo__tile demo__tile--note demo__tile--dark"></div>
+            </div>
+          </div>
+        </div>
+        <div class="feature__copy">
+          <span class="feature__index">03</span>
+          <h2>A board, not a folder.</h2>
+          <p>Everything you save lands on a Pinterest-style board — images at
+             their real size, notes and links as colored cards. Scan it at a
+             glance instead of digging through nested folders.</p>
+        </div>
+      </div>
+
+      <div class="feature feature--reverse reveal">
+        <div class="feature__visual">
+          <div class="demo demo--ask">
+            <div class="demo__search">
+              <svg viewBox="0 0 16 16" fill="currentColor" width="13" height="13">
+                <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.099zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z" />
+              </svg>
+              <span class="demo__typewriter" id="typewriter"></span>
+            </div>
+            <div class="demo__answer">
+              <p>Found it — the profile mentions <b>Chris Cox</b>, an early
+                 Facebook engineer who joined in 2005.</p>
+              <span class="demo__source-chip">early-fb-engineer.pdf</span>
+            </div>
+          </div>
+        </div>
+        <div class="feature__copy">
+          <span class="feature__index">04</span>
+          <h2>Ask your Carpet.</h2>
+          <p>Search by what you remember, not what you typed — "that article
+             about the early Facebook engineer" is enough. Powered by a local
+             AI model running on your machine via Ollama. Nothing is ever
+             sent to the cloud.</p>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ───────────────────────── Privacy ───────────────────────── -->
+    <section class="privacy reveal">
+      <h2>100% local. No account. No cloud.</h2>
+      <p>Every file, note, and embedding stays on your Mac in
+         <code>~/Library/Application Support/Carpet</code>. The optional AI
+         search runs against a local Ollama server on <code>localhost</code> —
+         Carpet never phones home.</p>
+    </section>
+
+    <!-- ───────────────────────── CTA ───────────────────────── -->
+    <section class="cta reveal">
+      <h2>Give your clutter a home.</h2>
+      <a class="btn btn--primary btn--lg" href="https://github.com/oshal7/Dumppad" target="_blank" rel="noopener">
+        Get Carpet on GitHub
+      </a>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Carpet</span>
+    <a href="https://github.com/oshal7/Dumppad" target="_blank" rel="noopener">Source on GitHub</a>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

@@ -8,11 +8,12 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
-    "dist": "electron-vite build && electron-builder"
+    "dist": "electron-vite build && electron-builder --publish=never"
   },
   "build": {
     "appId": "com.carpet.app",
     "productName": "Carpet",
+    "publish": null,
     "mac": {
       "category": "public.app-category.productivity",
       "target": [{ "target": "dmg", "arch": ["universal"] }],

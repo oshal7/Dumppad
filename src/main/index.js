@@ -1,210 +1,3 @@
-// ─── Storage ──────────────────────────────────────────────────────────────────
-const fs = require('fs')
-const pathModule = require('path')
-
-// Max data URL length we'll store (~1.5 MB covers most screenshots at reasonable quality)
-const MAX_IMAGE_DATA_URL = 1.5 * 1024 * 1024
-const DEFAULT_HISTORY_LIMIT = 100
-
-class Storage {
-  constructor(userDataPath) {
-    this.filePath = pathModule.join(userDataPath, 'clipboard-history.json')
-    this.data = this._load()
-  }
-
-  _load() {
-    try {
-      if (fs.existsSync(this.filePath)) {
-        return JSON.parse(fs.readFileSync(this.filePath, 'utf-8'))
-      }
-    } catch (e) {
-      console.error('[Storage] load failed:', e.message)
-    }
-    return { items: [], settings: { historyLimit: DEFAULT_HISTORY_LIMIT } }
-  }
-
-  _save() {
-    try {
-      fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2), 'utf-8')
-    } catch (e) {
-      console.error('[Storage] save failed:', e.message)
-    }
-  }
-
-  getItems() { return this.data.items }
-
-  getSettings() {
-    return { historyLimit: DEFAULT_HISTORY_LIMIT, ...this.data.settings }
-  }
-
-  updateSettings(newSettings) {
-    this.data.settings = { ...this.getSettings(), ...newSettings }
-    const limit = this.data.settings.historyLimit
-    const pinned = this.data.items.filter((i) => i.isPinned)
-    const fresh = this.data.items.filter((i) => !i.isPinned)
-    if (fresh.length > limit) {
-      this.data.items = [...pinned, ...fresh.slice(0, limit)]
-    }
-    this._save()
-    return { settings: this.data.settings, items: this.data.items }
-  }
-
-  addItem(item) {
-    const limit = this.getSettings().historyLimit
-    const unpinned = this.data.items.filter((i) => !i.isPinned)
-    const last = unpinned[0]
-    if (last) {
-      if (item.type === 'image' && last.type === 'image') {
-        // Compare first 150 chars of data URL as a fast signature
-        if (item.content.slice(0, 150) === last.content.slice(0, 150)) return false
-      } else if (item.type !== 'image' && last.type !== 'image') {
-        if (item.content === last.content) return false
-      }
-    }
-
-    this.data.items.unshift(item)
-    const pinned = this.data.items.filter((i) => i.isPinned)
-    const fresh = this.data.items.filter((i) => !i.isPinned)
-    if (fresh.length > limit) {
-      this.data.items = [...pinned, ...fresh.slice(0, limit)]
-    }
-    this._save()
-    return true
-  }
-
-  togglePin(id) {
-    const item = this.data.items.find((i) => i.id === id)
-    if (item) { item.isPinned = !item.isPinned; this._save() }
-    return this.data.items
-  }
-
-  deleteItem(id) {
-    this.data.items = this.data.items.filter((i) => i.id !== id)
-    this._save()
-    return this.data.items
-  }
-
-  clearHistory() {
-    this.data.items = this.data.items.filter((i) => i.isPinned)
-    this._save()
-    return this.data.items
-  }
-}
-
-// ─── Clipboard Monitor ────────────────────────────────────────────────────────
-const crypto = require('crypto')
-
-const MAX_TEXT_BYTES = 1024 * 1024
-const POLL_INTERVAL_MS = 800
-
-class ClipboardMonitor {
-  constructor(clipboardModule, nativeImageModule, onNewItem) {
-    this.clipboard = clipboardModule
-    this.nativeImage = nativeImageModule
-    this.onNewItem = onNewItem
-    this.lastTextContent = ''
-    this.lastImageSignature = ''
-    this.interval = null
-    this.isPaused = false
-  }
-
-  start() {
-    this.lastTextContent = this.clipboard.readText()
-    try {
-      const img = this.clipboard.readImage()
-      this.lastImageSignature = img.isEmpty() ? '' : img.toDataURL().slice(0, 150)
-    } catch {
-      this.lastImageSignature = ''
-    }
-    this.interval = setInterval(() => this._poll(), POLL_INTERVAL_MS)
-  }
-
-  stop() {
-    if (this.interval) { clearInterval(this.interval); this.interval = null }
-  }
-
-  pause() { this.isPaused = true }
-  resume() { this.isPaused = false }
-
-  async _poll() {
-    if (this.isPaused) return
-
-    const formats = this.clipboard.availableFormats()
-    const hasImage = formats.some(
-      (f) => f.startsWith('image/') || ['public.png', 'public.tiff', 'public.jpeg',
-        'com.apple.tiff', 'NSFilenamesPboardType'].includes(f)
-    )
-
-    // ── Image ────────────────────────────────────────────────────────────────
-    if (hasImage) {
-      let img
-      try { img = this.clipboard.readImage() } catch { /* fall through */ }
-
-      if (img && !img.isEmpty()) {
-        const dataURL = img.toDataURL()
-        const signature = dataURL.slice(0, 150)
-
-        if (signature !== this.lastImageSignature) {
-          this.lastImageSignature = signature
-          this.lastTextContent = ''
-
-          if (dataURL.length > MAX_IMAGE_DATA_URL) return // Too large — skip silently
-
-          const sourceApp = await this._getActiveApp()
-          this.onNewItem({
-            id: crypto.randomUUID(),
-            content: dataURL,
-            type: 'image',
-            sourceApp,
-            timestamp: new Date().toISOString(),
-            isPinned: false,
-          })
-          return
-        }
-      }
-    }
-
-    // ── Text ─────────────────────────────────────────────────────────────────
-    let content
-    try { content = this.clipboard.readText() } catch { return }
-    if (content === this.lastTextContent) return
-    this.lastTextContent = content
-    this.lastImageSignature = ''
-
-    if (!content || content.trim() === '') return
-    if (Buffer.byteLength(content, 'utf-8') > MAX_TEXT_BYTES) return
-
-    const trimmed = content.trim()
-    const sourceApp = await this._getActiveApp()
-    this.onNewItem({
-      id: crypto.randomUUID(),
-      content: trimmed,
-      type: this._detectType(trimmed),
-      sourceApp,
-      timestamp: new Date().toISOString(),
-      isPinned: false,
-    })
-  }
-
-  _detectType(content) {
-    if (/^https?:\/\//i.test(content)) return 'link'
-    if (content.includes('\n') && /[{};=>\(\)<>]/.test(content)) return 'code'
-    return 'text'
-  }
-
-  _getActiveApp() {
-    const { exec } = require('child_process')
-    return new Promise((resolve) => {
-      exec(
-        `osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true'`,
-        { timeout: 500 },
-        (err, stdout) => resolve(err ? 'Unknown' : stdout.trim()),
-      )
-    })
-  }
-}
-
-// ─── Main Process ─────────────────────────────────────────────────────────────
 const {
   app,
   BrowserWindow,
@@ -215,55 +8,65 @@ const {
   Tray,
   Menu,
   nativeImage,
-  dialog,
+  shell,
 } = require('electron')
 const path = require('path')
-const { exec } = require('child_process')
+const fs = require('fs')
+const crypto = require('crypto')
+
+const { Storage } = require('./storage')
+const { ClipboardMonitor } = require('./clipboardMonitor')
+const { AIClient, cosineSimilarity } = require('./ai')
+const { extractText } = require('./textExtract')
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) { app.quit(); process.exit(0) }
 
-let panelWindow = null
+// ─── State ───────────────────────────────────────────────────────────────────
+let notchWindow = null
+let libraryWindow = null
 let tray = null
-let isVisible = false
-let isPaused = false
-let previousApp = 'Finder'
-let monitor = null
 let storage = null
+let ai = null
+let monitor = null
+let isPaused = false
 
-const appTracker = setInterval(() => {
-  if (!isVisible) {
-    exec(
-      `osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true'`,
-      { timeout: 500 },
-      (err, stdout) => { if (!err && stdout.trim()) previousApp = stdout.trim() },
-    )
-  }
-}, 700)
+// The notch window's OS-level bounds only ever have two sizes: 'base' (its
+// permanent resting size, big enough to be a real drag-and-drop target) and
+// 'toast' (briefly taller, to show the "keep this?" prompt). Everything else
+// — idle look, drag-hover highlight, drop confirmation, click-to-open — is a
+// pure CSS/state change inside the renderer, because resizing the actual OS
+// window mid-drag is a race condition: Chromium does not fire `mouseenter`
+// during a native external drag, only `dragenter`/`dragover`/`drop`, so a
+// resize-on-hover scheme can miss the drag entirely.
+let notchState = 'base' // 'base' | 'toast'
+let pendingToast = null // { tempId, content, kind, sourceApp }
+let toastTimer = null
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function writeItemToClipboard(item) {
-  if (item.type === 'image') {
-    clipboard.writeImage(nativeImage.createFromDataURL(item.content))
-  } else {
-    clipboard.writeText(item.content)
-  }
+const NOTCH_SIZES = {
+  base: { width: 220, height: 44 },
+  toast: { width: 380, height: 108 },
 }
 
-// ── Window ────────────────────────────────────────────────────────────────────
+// ─── Notch window ────────────────────────────────────────────────────────────
 
-function createPanelWindow() {
+function notchBounds(state) {
   const primary = screen.getPrimaryDisplay()
-  // Use workArea so the window sits within the usable screen space (excluding
-  // macOS menu bar and dock), preventing the bottom bar from being hidden.
-  const { x, y, width, height } = primary.workArea
+  const { width, height } = NOTCH_SIZES[state]
+  const x = Math.round(primary.bounds.x + (primary.bounds.width - width) / 2)
+  return { x, y: primary.bounds.y, width, height }
+}
 
-  panelWindow = new BrowserWindow({
-    width,
-    height,
-    x,
-    y,
+function setNotchState(state, payload) {
+  notchState = state
+  if (!notchWindow) return
+  notchWindow.setBounds(notchBounds(state))
+  notchWindow.webContents.send('notch-state', { state, payload: payload || null })
+}
+
+function createNotchWindow() {
+  notchWindow = new BrowserWindow({
+    ...notchBounds('base'),
     transparent: true,
     frame: false,
     alwaysOnTop: true,
@@ -274,41 +77,113 @@ function createPanelWindow() {
     show: false,
     focusable: true,
     webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
+      preload: path.join(__dirname, '../preload/notch.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
     },
   })
 
-  panelWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  panelWindow.setAlwaysOnTop(true, 'screen-saver')
+  notchWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  notchWindow.setAlwaysOnTop(true, 'screen-saver')
 
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    panelWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  const rendererUrl = process.env['ELECTRON_RENDERER_URL']
+  if (rendererUrl) {
+    notchWindow.loadURL(`${rendererUrl}/notch.html`)
   } else {
-    panelWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
+    notchWindow.loadFile(path.join(__dirname, '../renderer/notch.html'))
+  }
+
+  notchWindow.once('ready-to-show', () => notchWindow.show())
+}
+
+// ─── Library window ──────────────────────────────────────────────────────────
+
+function createLibraryWindow() {
+  libraryWindow = new BrowserWindow({
+    width: 960,
+    height: 660,
+    minWidth: 700,
+    minHeight: 480,
+    show: false,
+    title: 'Carpet',
+    titleBarStyle: 'hiddenInset',
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/library.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  })
+
+  const rendererUrl = process.env['ELECTRON_RENDERER_URL']
+  if (rendererUrl) {
+    libraryWindow.loadURL(`${rendererUrl}/library.html`)
+  } else {
+    libraryWindow.loadFile(path.join(__dirname, '../renderer/library.html'))
+  }
+
+  libraryWindow.on('close', (e) => {
+    e.preventDefault()
+    libraryWindow.hide()
+  })
+}
+
+function toggleLibrary() {
+  if (!libraryWindow) createLibraryWindow()
+  if (libraryWindow.isVisible()) {
+    libraryWindow.hide()
+  } else {
+    libraryWindow.show()
+    libraryWindow.focus()
   }
 }
 
-function showPanel() {
-  if (!panelWindow) return
-  panelWindow.show()
-  panelWindow.focus()
-  isVisible = true
-  panelWindow.webContents.send('panel-show', { items: storage.getItems(), isPaused, settings: storage.getSettings() })
+function notifyLibraryRefresh() {
+  if (libraryWindow && !libraryWindow.isDestroyed()) {
+    libraryWindow.webContents.send('items-updated', storage.getItems())
+  }
 }
 
-function hidePanel() {
-  if (!panelWindow || !isVisible) return
-  isVisible = false
-  panelWindow.webContents.send('panel-hide')
-  setTimeout(() => { if (!isVisible) panelWindow.hide() }, 320)
+// ─── AI enrichment (async, best-effort) ─────────────────────────────────────
+
+async function enrichItem(item) {
+  const available = await ai.isAvailable()
+  if (!available) return
+
+  try {
+    if (item.kind === 'image') {
+      const abs = storage.getFileAbsolutePath(item)
+      const base64 = fs.readFileSync(abs).toString('base64')
+      const description = await ai.describeImage(base64)
+      if (!description) return
+      const embedding = await ai.embed(description)
+      storage.updateItem(item.id, {
+        aiDescription: description,
+        embedding,
+        searchText: description.toLowerCase(),
+      })
+    } else if (item.kind === 'file') {
+      const abs = storage.getFileAbsolutePath(item)
+      const text = await extractText(abs)
+      if (!text) return
+      const embedding = await ai.embed(text)
+      storage.updateItem(item.id, {
+        aiDescription: text.slice(0, 400),
+        embedding,
+        searchText: `${item.originalName || ''} ${text}`.toLowerCase(),
+      })
+    } else {
+      const embedding = await ai.embed(item.content)
+      if (embedding) storage.updateItem(item.id, { embedding })
+    }
+    notifyLibraryRefresh()
+  } catch (e) {
+    console.error('[enrichItem] failed:', e.message)
+  }
 }
 
-function togglePanel() { isVisible ? hidePanel() : showPanel() }
-
-// ── Tray ──────────────────────────────────────────────────────────────────────
+// ─── Tray ────────────────────────────────────────────────────────────────────
 
 function createTray() {
   const img = nativeImage.createFromDataURL(
@@ -316,146 +191,206 @@ function createTray() {
   )
   img.setTemplateImage(true)
   tray = new Tray(img)
-  tray.setToolTip('Memory Panel  —  ⌘P')
+  tray.setToolTip('Carpet')
   rebuildTrayMenu()
-  tray.on('click', togglePanel)
+  tray.on('click', toggleLibrary)
 }
 
 function rebuildTrayMenu() {
   if (!tray) return
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Show / Hide Panel', accelerator: 'CmdOrCtrl+P', click: togglePanel },
+    { label: 'Open Library', accelerator: 'CmdOrCtrl+Shift+L', click: toggleLibrary },
     { type: 'separator' },
     {
-      label: isPaused ? 'Resume Tracking' : 'Pause Tracking',
+      label: isPaused ? 'Resume Capturing' : 'Pause Capturing',
       click: () => {
         isPaused = !isPaused
         isPaused ? monitor.pause() : monitor.resume()
-        if (panelWindow && isVisible) panelWindow.webContents.send('tracking-state', isPaused)
         rebuildTrayMenu()
       },
     },
-    {
-      label: 'Clear History',
-      click: () => {
-        const items = storage.clearHistory()
-        if (panelWindow && isVisible) panelWindow.webContents.send('items-updated', items)
-      },
-    },
+    { label: 'Reveal Library Folder', click: () => shell.showItemInFolder(storage.filesDir) },
     { type: 'separator' },
-    { label: 'Quit Memory Panel', click: () => app.quit() },
+    { label: 'Quit Carpet', click: () => app.quit() },
   ]))
 }
 
-// ── App lifecycle ─────────────────────────────────────────────────────────────
+// ─── Clipboard capture → keep-toast flow ────────────────────────────────────
+
+function handleClipboardCandidate({ content, kind, sourceApp }) {
+  pendingToast = { tempId: crypto.randomUUID(), content, kind, sourceApp }
+  setNotchState('toast', pendingToast)
+
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    if (pendingToast) {
+      pendingToast = null
+      setNotchState('base')
+    }
+  }, 3000)
+}
+
+// ─── App lifecycle ───────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
   if (app.dock) app.dock.hide()
 
   storage = new Storage(app.getPath('userData'))
-  monitor = new ClipboardMonitor(clipboard, nativeImage, (item) => {
-    const added = storage.addItem(item)
-    if (added && isVisible && panelWindow) {
-      panelWindow.webContents.send('items-updated', storage.getItems())
-    }
-  })
+  ai = new AIClient(() => storage.getSettings())
+  monitor = new ClipboardMonitor(clipboard, handleClipboardCandidate)
   monitor.start()
 
-  createPanelWindow()
+  createNotchWindow()
   createTray()
 
-  if (!globalShortcut.register('CommandOrControl+P', togglePanel)) {
-    console.warn('[Shortcuts] Cmd+P could not be registered')
+  if (!globalShortcut.register('CommandOrControl+Shift+L', toggleLibrary)) {
+    console.warn('[Shortcuts] Cmd+Shift+L could not be registered')
   }
 })
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
-  clearInterval(appTracker)
   if (monitor) monitor.stop()
 })
 
 app.on('window-all-closed', (e) => e.preventDefault())
 
-// ── IPC ───────────────────────────────────────────────────────────────────────
+// ─── IPC: notch ──────────────────────────────────────────────────────────────
 
-ipcMain.on('close-panel', () => hidePanel())
-ipcMain.on('overlay-click', () => hidePanel())
+ipcMain.on('notch-click', () => toggleLibrary())
 
-ipcMain.handle('get-items', () => storage.getItems())
+ipcMain.handle('notch-drop-files', async (_, filePaths) => {
+  const sourceApp = null
+  const added = []
+  for (const filePath of filePaths) {
+    try {
+      const item = storage.addFileItem({ sourcePath: filePath, originalName: path.basename(filePath), sourceApp })
+      added.push(item)
+      enrichItem(item)
+    } catch (e) {
+      console.error('[notch-drop-files] failed for', filePath, e.message)
+    }
+  }
+  notifyLibraryRefresh()
+  return { count: added.length }
+})
 
-ipcMain.handle('paste-item', (_, id) => {
-  const item = storage.getItems().find((i) => i.id === id)
-  if (!item) return
-  writeItemToClipboard(item)
-  hidePanel()
-  const target = previousApp
-  setTimeout(() => {
-    exec(`osascript -e 'tell application "${target}" to activate'`, { timeout: 1000 }, () => {
-      setTimeout(() => {
-        exec(`osascript -e 'tell application "System Events" to keystroke "v" using command down'`, { timeout: 1000 })
-      }, 120)
-    })
-  }, 340)
+ipcMain.handle('notch-keep-toast', () => {
+  if (!pendingToast) return null
+  clearTimeout(toastTimer)
+  const { content, kind, sourceApp } = pendingToast
+  pendingToast = null
+  const item = storage.addTextItem({ content, kind, sourceApp })
+  enrichItem(item)
+  notifyLibraryRefresh()
+  setNotchState('base')
+  return item
+})
+
+ipcMain.on('notch-dismiss-toast', () => {
+  clearTimeout(toastTimer)
+  pendingToast = null
+  setNotchState('base')
+})
+
+// ─── IPC: library ────────────────────────────────────────────────────────────
+
+function itemForRenderer(item) {
+  if (item.kind === 'image' || item.kind === 'file') {
+    const abs = storage.getFileAbsolutePath(item)
+    return { ...item, fileUrl: `file://${abs}` }
+  }
+  return item
+}
+
+ipcMain.handle('get-items', () => storage.getItems().map(itemForRenderer))
+
+ipcMain.handle('get-ai-status', () => ai.isAvailable())
+
+ipcMain.handle('get-settings', () => storage.getSettings())
+ipcMain.handle('update-settings', (_, patch) => storage.updateSettings(patch))
+
+ipcMain.handle('search-items', async (_, query) => {
+  const items = storage.getItems()
+  const q = (query || '').trim()
+  if (!q) return items.map(itemForRenderer)
+
+  const lower = q.toLowerCase()
+  const keywordMatches = items.filter((i) => (i.searchText || '').includes(lower) || (i.content || '').toLowerCase().includes(lower))
+
+  const available = await ai.isAvailable()
+  if (!available) return keywordMatches.map(itemForRenderer)
+
+  const queryEmbedding = await ai.embed(q)
+  if (!queryEmbedding) return keywordMatches.map(itemForRenderer)
+
+  const scored = items
+    .filter((i) => i.embedding)
+    .map((i) => ({ item: i, score: cosineSimilarity(queryEmbedding, i.embedding) }))
+    .filter((s) => s.score > 0.35)
+    .sort((a, b) => b.score - a.score)
+
+  const rankedIds = new Set(scored.map((s) => s.item.id))
+  const merged = [
+    ...scored.map((s) => s.item),
+    ...keywordMatches.filter((i) => !rankedIds.has(i.id)),
+  ]
+  return merged.map(itemForRenderer)
+})
+
+ipcMain.handle('ask-ai', async (_, question) => {
+  const available = await ai.isAvailable()
+  if (!available) return { unavailable: true }
+
+  const queryEmbedding = await ai.embed(question)
+  const items = storage.getItems().filter((i) => i.embedding)
+  if (!queryEmbedding || items.length === 0) {
+    return { answer: null, sources: [] }
+  }
+
+  const top = items
+    .map((i) => ({ item: i, score: cosineSimilarity(queryEmbedding, i.embedding) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+    .filter((s) => s.score > 0.2)
+
+  if (top.length === 0) return { answer: null, sources: [] }
+
+  const context = top.map(({ item }) => {
+    if (item.kind === 'image' || item.kind === 'file') {
+      return `${item.originalName || 'File'}: ${item.aiDescription || ''}`
+    }
+    return item.content
+  })
+
+  const answer = await ai.ask(question, context)
+  return { answer, sources: top.map(({ item }) => itemForRenderer(item)) }
+})
+
+ipcMain.handle('open-item', (_, id) => {
+  const item = storage.getItem(id)
+  if (!item) return { success: false }
+
+  if (item.kind === 'image' || item.kind === 'file') {
+    shell.showItemInFolder(storage.getFileAbsolutePath(item))
+  } else {
+    clipboard.writeText(item.content)
+  }
+  return { success: true }
 })
 
 ipcMain.handle('copy-item', (_, id) => {
-  const item = storage.getItems().find((i) => i.id === id)
-  if (item) writeItemToClipboard(item)
-  hidePanel()
-})
+  const item = storage.getItem(id)
+  if (!item) return { success: false }
 
-ipcMain.handle('toggle-pin', (_, id) => storage.togglePin(id))
-ipcMain.handle('delete-item', (_, id) => storage.deleteItem(id))
-ipcMain.handle('clear-history', () => storage.clearHistory())
-ipcMain.handle('get-settings', () => storage.getSettings())
-ipcMain.handle('update-settings', (_, newSettings) => storage.updateSettings(newSettings))
-
-ipcMain.on('toggle-pause', (_, paused) => {
-  isPaused = paused
-  paused ? monitor.pause() : monitor.resume()
-  rebuildTrayMenu()
-})
-
-ipcMain.handle('copy-multiple', (_, ids) => {
-  const allItems = storage.getItems()
-  const textItems = ids
-    .map((id) => allItems.find((i) => i.id === id))
-    .filter((i) => i && i.type !== 'image')
-
-  if (textItems.length === 0) return { success: false, reason: 'no-text-items' }
-
-  const combined = textItems.map((i) => i.content).join('\n\n---\n\n')
-  clipboard.writeText(combined)
-  hidePanel()
-  return { success: true, count: textItems.length }
-})
-
-ipcMain.handle('save-item', async (_, id) => {
-  const item = storage.getItems().find((i) => i.id === id)
-  if (!item) return { success: false, error: 'Item not found' }
-
-  try {
-    if (item.type === 'image') {
-      const { canceled, filePath } = await dialog.showSaveDialog(panelWindow, {
-        defaultPath: `clipboard-image-${Date.now()}.png`,
-        filters: [{ name: 'PNG Image', extensions: ['png'] }],
-      })
-      if (canceled || !filePath) return { success: false }
-      const base64Data = item.content.replace(/^data:image\/\w+;base64,/, '')
-      fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'))
-      return { success: true, filePath }
-    } else {
-      const { canceled, filePath } = await dialog.showSaveDialog(panelWindow, {
-        defaultPath: `clipboard-${item.type}-${Date.now()}.txt`,
-        filters: [{ name: 'Text File', extensions: ['txt'] }],
-      })
-      if (canceled || !filePath) return { success: false }
-      fs.writeFileSync(filePath, item.content, 'utf-8')
-      return { success: true, filePath }
-    }
-  } catch (err) {
-    console.error('[save-item] error:', err.message)
-    return { success: false, error: err.message }
+  if (item.kind === 'image') {
+    clipboard.writeImage(nativeImage.createFromPath(storage.getFileAbsolutePath(item)))
+  } else if (item.kind === 'file') {
+    return { success: false, reason: 'not-copyable' }
+  } else {
+    clipboard.writeText(item.content)
   }
+  return { success: true }
 })
+
+ipcMain.handle('delete-item', (_, id) => storage.deleteItem(id).map(itemForRenderer))

@@ -23,50 +23,58 @@ const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) { app.quit(); process.exit(0) }
 
 // ─── State ───────────────────────────────────────────────────────────────────
-let notchWindow = null
-let libraryWindow = null
+let panelWindow = null
 let tray = null
 let storage = null
 let ai = null
 let monitor = null
 let isPaused = false
 
-// The notch window's OS-level bounds only ever have two sizes: 'base' (its
-// permanent resting size, big enough to be a real drag-and-drop target) and
-// 'toast' (briefly taller, to show the "keep this?" prompt). Everything else
-// — idle look, drag-hover highlight, drop confirmation, click-to-open — is a
-// pure CSS/state change inside the renderer, because resizing the actual OS
-// window mid-drag is a race condition: Chromium does not fire `mouseenter`
-// during a native external drag, only `dragenter`/`dragover`/`drop`, so a
-// resize-on-hover scheme can miss the drag entirely.
-let notchState = 'base' // 'base' | 'toast'
+let panelState = 'collapsed' // 'collapsed' | 'expanded'
+let pinned = false
 let pendingToast = null // { tempId, content, kind, sourceApp }
 let toastTimer = null
+let hoverEnterTimer = null
+let hoverLeaveTimer = null
 
-const NOTCH_SIZES = {
-  base: { width: 220, height: 44 },
-  toast: { width: 380, height: 108 },
-}
+const COLLAPSED_WIDTH = 22
+const EXPANDED_WIDTH = 460
 
-// ─── Notch window ────────────────────────────────────────────────────────────
+// ─── Panel window (docked to the right edge) ────────────────────────────────
 
-function notchBounds(state) {
+function panelBounds(state) {
   const primary = screen.getPrimaryDisplay()
-  const { width, height } = NOTCH_SIZES[state]
-  const x = Math.round(primary.bounds.x + (primary.bounds.width - width) / 2)
-  return { x, y: primary.bounds.y, width, height }
+  const width = state === 'expanded' ? EXPANDED_WIDTH : COLLAPSED_WIDTH
+  const x = Math.round(primary.bounds.x + primary.bounds.width - width)
+  return { x, y: primary.bounds.y, width, height: primary.bounds.height }
 }
 
-function setNotchState(state, payload) {
-  notchState = state
-  if (!notchWindow) return
-  notchWindow.setBounds(notchBounds(state))
-  notchWindow.webContents.send('notch-state', { state, payload: payload || null })
+function sendPanelState() {
+  if (panelWindow) panelWindow.webContents.send('panel-state', { state: panelState, pinned })
 }
 
-function createNotchWindow() {
-  notchWindow = new BrowserWindow({
-    ...notchBounds('base'),
+function expand() {
+  panelState = 'expanded'
+  if (panelWindow) panelWindow.setBounds(panelBounds('expanded'))
+  sendPanelState()
+}
+
+function collapse() {
+  if (pinned || pendingToast) return
+  panelState = 'collapsed'
+  if (panelWindow) panelWindow.setBounds(panelBounds('collapsed'))
+  sendPanelState()
+}
+
+function togglePin() {
+  pinned = !pinned
+  pinned ? expand() : collapse()
+  rebuildTrayMenu()
+}
+
+function createPanelWindow() {
+  panelWindow = new BrowserWindow({
+    ...panelBounds('collapsed'),
     transparent: true,
     frame: false,
     alwaysOnTop: true,
@@ -77,71 +85,28 @@ function createNotchWindow() {
     show: false,
     focusable: true,
     webPreferences: {
-      preload: path.join(__dirname, '../preload/notch.js'),
+      preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
     },
   })
 
-  notchWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  notchWindow.setAlwaysOnTop(true, 'screen-saver')
+  panelWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  panelWindow.setAlwaysOnTop(true, 'screen-saver')
 
-  const rendererUrl = process.env['ELECTRON_RENDERER_URL']
-  if (rendererUrl) {
-    notchWindow.loadURL(`${rendererUrl}/notch.html`)
+  if (process.env['ELECTRON_RENDERER_URL']) {
+    panelWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    notchWindow.loadFile(path.join(__dirname, '../renderer/notch.html'))
+    panelWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
 
-  notchWindow.once('ready-to-show', () => notchWindow.show())
+  panelWindow.once('ready-to-show', () => panelWindow.show())
 }
 
-// ─── Library window ──────────────────────────────────────────────────────────
-
-function createLibraryWindow() {
-  libraryWindow = new BrowserWindow({
-    width: 960,
-    height: 660,
-    minWidth: 700,
-    minHeight: 480,
-    show: false,
-    title: 'Carpet',
-    titleBarStyle: 'hiddenInset',
-    webPreferences: {
-      preload: path.join(__dirname, '../preload/library.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-    },
-  })
-
-  const rendererUrl = process.env['ELECTRON_RENDERER_URL']
-  if (rendererUrl) {
-    libraryWindow.loadURL(`${rendererUrl}/library.html`)
-  } else {
-    libraryWindow.loadFile(path.join(__dirname, '../renderer/library.html'))
-  }
-
-  libraryWindow.on('close', (e) => {
-    e.preventDefault()
-    libraryWindow.hide()
-  })
-}
-
-function toggleLibrary() {
-  if (!libraryWindow) createLibraryWindow()
-  if (libraryWindow.isVisible()) {
-    libraryWindow.hide()
-  } else {
-    libraryWindow.show()
-    libraryWindow.focus()
-  }
-}
-
-function notifyLibraryRefresh() {
-  if (libraryWindow && !libraryWindow.isDestroyed()) {
-    libraryWindow.webContents.send('items-updated', storage.getItems())
+function notifyItemsRefresh() {
+  if (panelWindow && !panelWindow.isDestroyed()) {
+    panelWindow.webContents.send('items-updated', storage.getItems().map(itemForRenderer))
   }
 }
 
@@ -158,11 +123,7 @@ async function enrichItem(item) {
       const description = await ai.describeImage(base64)
       if (!description) return
       const embedding = await ai.embed(description)
-      storage.updateItem(item.id, {
-        aiDescription: description,
-        embedding,
-        searchText: description.toLowerCase(),
-      })
+      storage.updateItem(item.id, { aiDescription: description, embedding, searchText: description.toLowerCase() })
     } else if (item.kind === 'file') {
       const abs = storage.getFileAbsolutePath(item)
       const text = await extractText(abs)
@@ -177,7 +138,7 @@ async function enrichItem(item) {
       const embedding = await ai.embed(item.content)
       if (embedding) storage.updateItem(item.id, { embedding })
     }
-    notifyLibraryRefresh()
+    notifyItemsRefresh()
   } catch (e) {
     console.error('[enrichItem] failed:', e.message)
   }
@@ -193,13 +154,13 @@ function createTray() {
   tray = new Tray(img)
   tray.setToolTip('Carpet')
   rebuildTrayMenu()
-  tray.on('click', toggleLibrary)
+  tray.on('click', togglePin)
 }
 
 function rebuildTrayMenu() {
   if (!tray) return
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Open Library', accelerator: 'CmdOrCtrl+Shift+L', click: toggleLibrary },
+    { label: pinned ? 'Close Carpet' : 'Open Carpet', accelerator: 'CmdOrCtrl+Shift+L', click: togglePin },
     { type: 'separator' },
     {
       label: isPaused ? 'Resume Capturing' : 'Pause Capturing',
@@ -219,13 +180,14 @@ function rebuildTrayMenu() {
 
 function handleClipboardCandidate({ content, kind, sourceApp }) {
   pendingToast = { tempId: crypto.randomUUID(), content, kind, sourceApp }
-  setNotchState('toast', pendingToast)
+  expand()
+  if (panelWindow) panelWindow.webContents.send('toast-updated', pendingToast)
 
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => {
     if (pendingToast) {
       pendingToast = null
-      setNotchState('base')
+      if (panelWindow) panelWindow.webContents.send('toast-updated', null)
     }
   }, 3000)
 }
@@ -240,10 +202,10 @@ app.whenReady().then(() => {
   monitor = new ClipboardMonitor(clipboard, handleClipboardCandidate)
   monitor.start()
 
-  createNotchWindow()
+  createPanelWindow()
   createTray()
 
-  if (!globalShortcut.register('CommandOrControl+Shift+L', toggleLibrary)) {
+  if (!globalShortcut.register('CommandOrControl+Shift+L', togglePin)) {
     console.warn('[Shortcuts] Cmd+Shift+L could not be registered')
   }
 })
@@ -255,45 +217,62 @@ app.on('will-quit', () => {
 
 app.on('window-all-closed', (e) => e.preventDefault())
 
-// ─── IPC: notch ──────────────────────────────────────────────────────────────
+// ─── IPC: panel hover / drag / pin ───────────────────────────────────────────
 
-ipcMain.on('notch-click', () => toggleLibrary())
+ipcMain.on('panel-hover-enter', () => {
+  clearTimeout(hoverLeaveTimer)
+  clearTimeout(hoverEnterTimer)
+  hoverEnterTimer = setTimeout(expand, 120)
+})
 
-ipcMain.handle('notch-drop-files', async (_, filePaths) => {
-  const sourceApp = null
+ipcMain.on('panel-hover-leave', () => {
+  clearTimeout(hoverEnterTimer)
+  clearTimeout(hoverLeaveTimer)
+  hoverLeaveTimer = setTimeout(collapse, 350)
+})
+
+ipcMain.on('panel-drag-enter', () => {
+  clearTimeout(hoverEnterTimer)
+  clearTimeout(hoverLeaveTimer)
+  expand()
+})
+
+ipcMain.on('panel-toggle-pin', () => togglePin())
+
+ipcMain.handle('panel-drop-files', async (_, filePaths) => {
   const added = []
   for (const filePath of filePaths) {
     try {
-      const item = storage.addFileItem({ sourcePath: filePath, originalName: path.basename(filePath), sourceApp })
+      const item = storage.addFileItem({ sourcePath: filePath, originalName: path.basename(filePath), sourceApp: null })
       added.push(item)
       enrichItem(item)
     } catch (e) {
-      console.error('[notch-drop-files] failed for', filePath, e.message)
+      console.error('[panel-drop-files] failed for', filePath, e.message)
     }
   }
-  notifyLibraryRefresh()
+  notifyItemsRefresh()
   return { count: added.length }
 })
 
-ipcMain.handle('notch-keep-toast', () => {
+ipcMain.handle('panel-keep-toast', () => {
   if (!pendingToast) return null
   clearTimeout(toastTimer)
   const { content, kind, sourceApp } = pendingToast
   pendingToast = null
+  if (panelWindow) panelWindow.webContents.send('toast-updated', null)
   const item = storage.addTextItem({ content, kind, sourceApp })
   enrichItem(item)
-  notifyLibraryRefresh()
-  setNotchState('base')
+  notifyItemsRefresh()
   return item
 })
 
-ipcMain.on('notch-dismiss-toast', () => {
+ipcMain.handle('panel-dismiss-toast', () => {
   clearTimeout(toastTimer)
   pendingToast = null
-  setNotchState('base')
+  if (panelWindow) panelWindow.webContents.send('toast-updated', null)
 })
 
-// ─── IPC: library ────────────────────────────────────────────────────────────
+// ─── IPC: library/board ──────────────────────────────────────────────────────
 
 function itemForRenderer(item) {
   if (item.kind === 'image' || item.kind === 'file') {
@@ -331,10 +310,7 @@ ipcMain.handle('search-items', async (_, query) => {
     .sort((a, b) => b.score - a.score)
 
   const rankedIds = new Set(scored.map((s) => s.item.id))
-  const merged = [
-    ...scored.map((s) => s.item),
-    ...keywordMatches.filter((i) => !rankedIds.has(i.id)),
-  ]
+  const merged = [...scored.map((s) => s.item), ...keywordMatches.filter((i) => !rankedIds.has(i.id))]
   return merged.map(itemForRenderer)
 })
 
@@ -344,9 +320,7 @@ ipcMain.handle('ask-ai', async (_, question) => {
 
   const queryEmbedding = await ai.embed(question)
   const items = storage.getItems().filter((i) => i.embedding)
-  if (!queryEmbedding || items.length === 0) {
-    return { answer: null, sources: [] }
-  }
+  if (!queryEmbedding || items.length === 0) return { answer: null, sources: [] }
 
   const top = items
     .map((i) => ({ item: i, score: cosineSimilarity(queryEmbedding, i.embedding) }))
@@ -357,9 +331,7 @@ ipcMain.handle('ask-ai', async (_, question) => {
   if (top.length === 0) return { answer: null, sources: [] }
 
   const context = top.map(({ item }) => {
-    if (item.kind === 'image' || item.kind === 'file') {
-      return `${item.originalName || 'File'}: ${item.aiDescription || ''}`
-    }
+    if (item.kind === 'image' || item.kind === 'file') return `${item.originalName || 'File'}: ${item.aiDescription || ''}`
     return item.content
   })
 

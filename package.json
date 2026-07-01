@@ -15,10 +15,14 @@
     "productName": "Carpet",
     "mac": {
       "category": "public.app-category.productivity",
-      "target": "dmg"
+      "target": [{ "target": "dmg", "arch": ["universal"] }],
+      "identity": null,
+      "hardenedRuntime": false
     },
     "files": [
-      "out/**/*"
+      "out/**/*",
+      "node_modules/**/*",
+      "package.json"
     ]
   },
   "dependencies": {

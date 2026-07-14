@@ -45,13 +45,11 @@ export default function ItemCard({ item, onOpen, onCopy, onDelete }) {
       <div className="card__footer">
         <span className="card__time">{formatRelativeTime(item.timestamp)}</span>
         <div className="card__actions">
-          <button className="card__btn" onClick={() => onOpen(item.id)} title={item.kind === 'image' || item.kind === 'file' ? 'Reveal in Finder' : 'Copy'}>
-            {item.kind === 'image' || item.kind === 'file' ? (
+          {(item.kind === 'image' || item.kind === 'file') && (
+            <button className="card__btn" onClick={() => onOpen(item.id)} title="Reveal in Finder">
               <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M8.5 1.5A.5.5 0 0 1 9 1h5a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0V2.707L8.354 8.854a.5.5 0 1 1-.708-.708L13.793 2H9a.5.5 0 0 1-.5-.5z"/><path d="M4.5 3a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5V8a.5.5 0 0 1 1 0v4.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 3 12.5v-9A1.5 1.5 0 0 1 4.5 2H9a.5.5 0 0 1 0 1H4.5z"/></svg>
-            ) : (
-              <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M13 0H6a2 2 0 0 0-2 2 2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2 2 2 0 0 0 2-2V2a2 2 0 0 0-2-2zm0 13V4a2 2 0 0 0-2-2H5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1zM3 4a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4z"/></svg>
-            )}
-          </button>
+            </button>
+          )}
           {item.kind !== 'file' && (
             <button className="card__btn" onClick={() => onCopy(item.id)} title="Copy">
               <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M13 0H6a2 2 0 0 0-2 2 2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2 2 2 0 0 0 2-2V2a2 2 0 0 0-2-2zm0 13V4a2 2 0 0 0-2-2H5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1zM3 4a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4z"/></svg>

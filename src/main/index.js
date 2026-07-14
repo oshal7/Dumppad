@@ -188,6 +188,9 @@ function handleClipboardCandidate({ content, kind, sourceApp }) {
     if (pendingToast) {
       pendingToast = null
       if (panelWindow) panelWindow.webContents.send('toast-updated', null)
+      // The toast auto-expanded the panel; if the user never actually
+      // hovered it, no mouseleave will ever fire to collapse it again.
+      collapse()
     }
   }, 3000)
 }
